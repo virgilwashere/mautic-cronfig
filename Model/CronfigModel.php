@@ -14,28 +14,24 @@ use Mautic\CoreBundle\Helper\CacheHelper;
 use Mautic\CoreBundle\Helper\CoreParametersHelper;
 use Mautic\CoreBundle\Helper\EncryptionHelper;
 use Mautic\CoreBundle\Model\AbstractCommonModel;
+use Mautic\IntegrationsBundle\Exception\PluginNotConfiguredException;
 
-/**
- * Class CronfigModel.
- */
 class CronfigModel extends AbstractCommonModel
 {
     /**
-     * Cronfig config params from local.php.
-     *
-     * @var array
+     * @var CoreParametersHelper
      */
-    protected $config;
+    protected $coreParametersHelper;
 
     /**
      * @var Configurator
      */
-    protected $configurator;
+    private $configurator;
 
     /**
      * @var CacheHelper
      */
-    protected $cache;
+    private $cache;
 
     /**
      * @var Constructor
@@ -45,9 +41,9 @@ class CronfigModel extends AbstractCommonModel
         Configurator $configurator,
         CacheHelper $cacheHelper)
     {
-        $this->config       = $coreParametersHelper->getParameter('cronfig');
-        $this->configurator = $configurator;
-        $this->cache        = $cacheHelper;
+        $this->coreParametersHelper = $coreParametersHelper;
+        $this->configurator         = $configurator;
+        $this->cache                = $cacheHelper;
     }
 
     /**
@@ -102,6 +98,42 @@ class CronfigModel extends AbstractCommonModel
                 'title'       => 'Process background imports',
                 'description' => 'This task is needed for running imports on background so you don\'t have to wait with open browser.',
             ],
+            'mautic:integration:fetchleads --integration=Hubspot' => [
+                'title'       => 'Fetch contacts from Hubspot every 15 minutes',
+                'description' => 'Turn this on to fetch contacts from Hubspot. It is important to configure the period to 15 minutes for it to work correctly. Use the campaign action to push contacts to Hubspot.',
+            ],
+            'mautic:integration:fetchleads --integration=Salesforce' => [
+                'title'       => 'Fetch contacts from Salesforce every 15 minutes',
+                'description' => 'Turn this on to fetch contacts from Salesforce. It is important to configure the period to 15 minutes for it to work correctly. Use the campaign action to push contacts to Salesforce.',
+            ],
+            'mautic:integration:fetchleads --integration=Vtiger' => [
+                'title'       => 'Fetch contacts from vTiger every 15 minutes',
+                'description' => 'Turn this on to fetch contacts from vTiger. It is important to configure the period to 15 minutes for it to work correctly. Use the campaign action to push contacts to vTiger.',
+            ],
+            'mautic:integration:fetchleads --integration=Sugarcrm' => [
+                'title'       => 'Fetch contacts from Sugar CRM every 15 minutes',
+                'description' => 'Turn this on to fetch contacts from Sugar CRM. It is important to configure the period to 15 minutes for it to work correctly. Use the campaign action to push contacts to Sugar CRM.',
+            ],
+            'mautic:integration:fetchleads --integration=Zoho' => [
+                'title'       => 'Fetch contacts from Zoho CRM every 15 minutes',
+                'description' => 'Turn this on to fetch contacts from Zoho CRM. It is important to configure the period to 15 minutes for it to work correctly. Use the campaign action to push contacts to Zoho CRM.',
+            ],
+            'mautic:maintenance:cleanup --no-interaction --gdpr' => [
+                'title'       => 'GDPR complience cleanup',
+                'description' => 'Delete data to fulfill GDPR European regulation. This will delete leads that have been inactive for 3 years. WARNING: The deleted data cannot be recovered and it will change Mautic statistics.',
+            ],
+            'mautic:maintenance:cleanup --no-interaction' => [
+                'title'       => 'Maintenance: 1 year cleanup',
+                'description' => 'Deletes data for contacts that were not active for 1 year. Currently supported are audit log entries, visitors (anonymous contacts), and visitor page hits. WARNING: The deleted data cannot be recovered and it will change Mautic statistics.',
+            ],
+            'mautic:contacts:deduplicate' => [
+                'title'       => 'Maintenance: Deduplicate contacts',
+                'description' => 'It may happen that some duplicate contacts will get into the system somehow. This task will find contacts with the same unique identifiers and merge them.',
+            ],
+            'mautic:unusedip:delete' => [
+                'title'       => 'Maintenance: Deduplicate contacts',
+                'description' => 'Deletes IP addresses that are not used in any other database table. Those IP adresses usually belonged to contacts that were deleted already.',
+            ],
         ];
     }
 
@@ -110,13 +142,20 @@ class CronfigModel extends AbstractCommonModel
      *
      * @return array
      */
-    public function getCommandsWithUrls($baseUrl, $secretKey)
+    public function getCommandsWithUrls()
     {
-        $secretKeyParam = '?secret_key='.$secretKey;
+        $baseUrl   = rtrim($this->coreParametersHelper->getParameter('site_url'), '/');
+        $config    = $this->coreParametersHelper->getParameter('cronfig');
+        $secretKey = empty($config['secret_key']) ? '' : $config['secret_key'];
+
+        if (empty($baseUrl)) {
+            throw new PluginNotConfiguredException("Site URL is not configured. Please go to Mautic configuration and fill it in.");
+        }
 
         return array_map(
-            function ($command, $commandConfig) use ($baseUrl, $secretKeyParam) {
-                $commandConfig['url'] = $baseUrl.'cronfig/'.urlencode($command).$secretKeyParam;
+            function ($command, $commandConfig) use ($baseUrl, $secretKey) {
+                $encodedCommand = urlencode($command);
+                $commandConfig['url'] = "{$baseUrl}/cronfig/{$encodedCommand}?secret_key={$secretKey}";
 
                 return $commandConfig;
             },
@@ -129,12 +168,13 @@ class CronfigModel extends AbstractCommonModel
      * Save API key to the local.php config file if it's new. Returns the secret key.
      *
      * @param string $apiKey
+     * @param string $namespace
      *
      * @return string
      *
-     * @throws Exception
+     * @throws \Exception
      */
-    public function saveApiKey($apiKey)
+    public function saveApiKey($apiKey, $namespace = 'cronfig')
     {
         if (!$apiKey) {
             throw new \Exception('cronfig.api.key.empty');
@@ -144,30 +184,44 @@ class CronfigModel extends AbstractCommonModel
             throw new \Exception('mautic.config.notwritable');
         }
 
+        $config = $this->coreParametersHelper->getParameter($namespace);
+
         // Ensure the config has a secret key
-        if (empty($this->config['secret_key'])) {
+        if (empty($config['secret_key'])) {
             $secretKey = EncryptionHelper::generateKey();
         } else {
-            $secretKey = $this->config['secret_key'];
+            $secretKey = $config['secret_key'];
         }
 
         // Save the API key and secret key only if it doesn't exist or has changed
-        if (empty($this->config['api_key'])
-            || empty($this->config['secret_key'])
-            || $this->config['api_key'] !== $apiKey
-            || $this->config['secret_key'] !== $secretKey) {
-            $this->configurator->mergeParameters(
-                [
-                    'cronfig' => [
-                        'api_key'    => $apiKey,
-                        'secret_key' => $secretKey,
-                    ],
-                ]
-            );
+        if (empty($config['api_key'])
+            || empty($config['secret_key'])
+            || $config['api_key'] !== $apiKey
+            || $config['secret_key'] !== $secretKey) {
+            
+
+            if ('_cleanup_' === $apiKey) {
+                $this->configurator->mergeParameters(
+                    [
+                        $namespace => null,
+                    ]
+                );
+            } else {
+                $this->configurator->mergeParameters(
+                    [
+                        $namespace => [
+                            'api_key'    => $apiKey,
+                            'secret_key' => $secretKey,
+                        ],
+                    ]
+                );
+            }
             $this->configurator->write();
 
-            // We must clear the application cache for the updated values to take effect
-            $this->cache->clearContainerFile();
+            // We must clear the application cache for M2 for the updated values to take effect. M3 doesn't need it.
+            if (method_exists($this->cache, 'clearContainerFile')) {
+                $this->cache->clearContainerFile();
+            }
         }
 
         return $secretKey;

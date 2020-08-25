@@ -16,6 +16,11 @@ $view['slots']->set('headerTitle', $view['translator']->trans('cronfig.title'));
 echo $view['assets']->includeStylesheet('plugins/CronfigBundle/Assets/css/cronfig.css');
 
 ?>
+<?php if ($error) : ?>
+<div class="alert alert-danger" role="alert">
+    <?php echo $error; ?>
+</div>
+<?php endif; ?>
 <!--[if lt IE 8]>
     <p class="browsehappy">You are using an <strong>outdated</strong> browser. Please <a href="http://browsehappy.com/">upgrade your browser</a> to improve your experience.</p>
 <![endif]-->
@@ -26,12 +31,12 @@ echo $view['assets']->includeStylesheet('plugins/CronfigBundle/Assets/css/cronfi
         onerror="this.src='<?php echo $view['assets']->getUrl('plugins/CronfigBundle/Assets/img/ring.gif'); ?>'; this.onerror=null;"
         alt="loading..." />
 </div>
-<script type="text/javascript">
+<script id="cronfig-config" type="text/javascript">
     document.cronfigConfig = {
         platform: 'mautic',
-        tasks: <?php echo json_encode($commands) ?>,
-        email: '<?php echo $email ?>',
-        apiKey: '<?php echo $apiKey ?>',
+        tasks: <?php echo json_encode($commands); ?>,
+        email: '<?php echo $email; ?>',
+        apiKey: '<?php echo $apiKey; ?>',
         rememberApiKey: function(apiKey) {
             Mautic.ajaxActionRequest('plugin:cronfig:saveApiKey', 'apiKey=' + apiKey, function(response) {
                 if (typeof response.secret_key !== 'undefined') {
